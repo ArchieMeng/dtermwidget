@@ -600,6 +600,11 @@ void QTermWidget::setTextCodec(QTextCodec *codec)
     m_impl->m_session->setCodec(codec);
 }
 
+void QTermWidget::setTerminalWordCharacters(const QString &wc)
+{
+    m_impl->m_terminalDisplay->setWordCharacters(wc);
+}
+
 void QTermWidget::setColorScheme(const QString &origName)
 {
     setColorScheme(origName, false);
