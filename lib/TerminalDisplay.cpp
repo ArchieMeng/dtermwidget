@@ -811,14 +811,30 @@ void TerminalDisplay::drawCursor(QPainter& painter,
        else if ( _cursorShape == Emulation::KeyboardCursorShape::UnderlineCursor )
             painter.drawLine(cursorRect.left(),
                              cursorRect.bottom(),
-                             cursorRect.right(),
+                             cursorRect.right() - 1,
                              cursorRect.bottom());
        else if ( _cursorShape == Emulation::KeyboardCursorShape::IBeamCursor )
             painter.drawLine(cursorRect.left(),
                              cursorRect.top(),
                              cursorRect.left(),
                              cursorRect.bottom());
-
+       else if ( _cursorShape == Emulation::KeyboardCursorShape::BoldUnderlineCursor )
+        {
+            if ( hasFocus() )
+            {
+                cursorRect.translate(0,cursorRect.height());
+                cursorRect.setHeight(4);
+                painter.fillRect(cursorRect, _cursorColor.isValid() ? _cursorColor : foregroundColor);
+            }
+            else
+            {
+                painter.drawRect(
+                                cursorRect.left(),
+                                cursorRect.bottom(),
+                                cursorRect.width(),
+                                4);
+            }
+        }
     }
 }
 
@@ -1259,7 +1275,7 @@ void TerminalDisplay::updateImage()
         QRect dirtyRect = QRect( _leftMargin+tLx ,
                                  _topMargin+tLy+_fontHeight*y ,
                                  _fontWidth * columnsToUpdate ,
-                                 _fontHeight );
+                                 _fontHeight + 3 );
 
         dirtyRegion |= dirtyRect;
     }
@@ -1294,7 +1310,7 @@ void TerminalDisplay::updateImage()
   // update the parts of the display which have changed
   update(dirtyRegion);
 
-  if ( _hasBlinker && !_blinkTimer->isActive()) _blinkTimer->start( TEXT_BLINK_DELAY );
+  if (_hasBlinker && !_blinkTimer->isActive()) _blinkTimer->start( TEXT_BLINK_DELAY );
   if (!_hasBlinker && _blinkTimer->isActive()) { _blinkTimer->stop(); _blinking = false; }
   delete[] dirtyMask;
   delete[] disstrU;
@@ -1813,10 +1829,7 @@ void TerminalDisplay::blinkEvent()
 
   _blinking = !_blinking;
 
-  //TODO:  Optimize to only repaint the areas of the widget
-  // where there is blinking text
-  // rather than repainting the whole widget.
-  update();
+  updateCursor();
 }
 
 QRect TerminalDisplay::imageToWidget(const QRect& imageArea) const
@@ -1824,16 +1837,17 @@ QRect TerminalDisplay::imageToWidget(const QRect& imageArea) const
     QRect result;
     result.setLeft( _leftMargin + _fontWidth * imageArea.left() );
     result.setTop( _topMargin + _fontHeight * imageArea.top() );
-    result.setWidth( _fontWidth * imageArea.width() );
-    result.setHeight( _fontHeight * imageArea.height() );
+    result.setWidth(_fontWidth * imageArea.width());
+    // Extra height for BoldUnderlineCursor
+    result.setHeight(_fontHeight * imageArea.height() + 3);
 
     return result;
 }
 
 void TerminalDisplay::updateCursor()
 {
-  QRect cursorRect = imageToWidget( QRect(cursorPosition(),QSize(1,1)) );
-  update(cursorRect);
+   QRect cursorRect = imageToWidget( QRect(cursorPosition(), QSize(1, 1)) );
+   update(cursorRect);
 }
 
 void TerminalDisplay::blinkCursorEvent()
