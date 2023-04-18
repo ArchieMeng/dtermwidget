@@ -482,7 +482,7 @@ public:
     bool deleteTranslator(const QString& name);
 
     /** Returns the default translator for Konsole. */
-    const KeyboardTranslator* defaultTranslator();
+    KeyboardTranslator* defaultTranslator();
 
     /**
      * Returns the keyboard translator with the given name or 0 if no translator
@@ -491,7 +491,7 @@ public:
      * The first time that a translator with a particular name is requested,
      * the on-disk .keyboard file is loaded and parsed.
      */
-    const KeyboardTranslator* findTranslator(const QString& name);
+    KeyboardTranslator* findTranslator(const QString& name);
     /**
      * Returns a list of the names of available keyboard translators.
      *
@@ -499,6 +499,10 @@ public:
      * translators is started.
      */
     QList<QString> allTranslators();
+
+    /******** Modify by ut000610 daizhengwen 2020-06-02: 用于修改数据****************/
+    KeyboardTranslator *getTranslator(const QString &name);
+    /********************* Modify by ut000610 daizhengwen End ************************/
 
     /** Returns the global KeyboardTranslatorManager instance. */
    static KeyboardTranslatorManager* instance();

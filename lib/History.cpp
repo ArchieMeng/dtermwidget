@@ -81,6 +81,16 @@ FIXME: There is noticeable decrease in speed, also. Perhaps,
 
 //#define tmpfile xTmpFile
 
+struct reflowData { // data to reflow lines
+    qint64 index;
+    bool lineFlag;
+};
+
+struct reflowsData { // data to reflow lines
+    QList<int> index;
+    QList<LineProperty> flags;
+};
+
 // History File ///////////////////////////////////////////
 
 /*
@@ -177,6 +187,15 @@ void HistoryFile::get(unsigned char* bytes, int len, int loc)
   }
 }
 
+void HistoryFile::removeLast(qint64 loc)
+{
+    if (loc < 0 || loc > length) {
+        fprintf(stderr, "removeLast(%lld): invalid args.\n", loc);
+        return;
+    }
+    length = loc;
+}
+
 int HistoryFile::len()
 {
   return length;
@@ -229,6 +248,11 @@ int HistoryScrollFile::getLines()
   return index.len() / sizeof(int);
 }
 
+int HistoryScrollFile::getMaxLines()
+{
+    return getLines();
+}
+
 int HistoryScrollFile::getLineLen(int lineno)
 {
   return (startOfLine(lineno+1) - startOfLine(lineno)) / sizeof(Character);
@@ -242,6 +266,17 @@ bool HistoryScrollFile::isWrappedLine(int lineno)
     return flag;
   }
   return false;
+}
+
+LineProperty HistoryScrollFile::getLineProperty(int lineno)
+{
+    if (lineno >= 0 && lineno <= getLines()) {
+        LineProperty flag = 0;
+        lineflags.get(reinterpret_cast<unsigned char *>(&flag), sizeof(unsigned char),
+                       (lineno)*sizeof(unsigned char));
+        return flag;
+    }
+    return 0;
 }
 
 int HistoryScrollFile::startOfLine(int lineno)
@@ -281,6 +316,84 @@ void HistoryScrollFile::addLine(bool previousWrapped)
   lineflags.add((unsigned char*)&flags,sizeof(unsigned char));
 }
 
+void HistoryScrollFile::removeCells()
+{
+    qint64 res = (getLines() - 2) * sizeof(qint64);
+    if (getLines() < 2) {
+        cells.removeLast(0);
+    } else {
+        index.get(reinterpret_cast<unsigned char *>(&res), sizeof(qint64), res);
+        cells.removeLast(res);
+    }
+    res = qMax(0, getLines() - 1);
+    index.removeLast(res * sizeof(qint64));
+    lineflags.removeLast(res * sizeof(unsigned char));
+}
+
+int HistoryScrollFile::reflowLines(int columns)
+{
+    HistoryFile *reflowFile = new HistoryFile;
+    reflowData newLine;
+
+    auto reflowLineLen = [] (int start, int end) {
+        return (int)((end - start) / sizeof(Character));
+    };
+    auto setNewLine = [] (reflowData &change, int index, bool lineflag) {
+        change.index = index;
+        change.lineFlag = lineflag;
+    };
+
+    // First all changes are saved on an auxiliary file, no real index is changed
+    int currentPos = 0;
+    if (getLines() > MAX_REFLOW_LINES) {
+        currentPos = getLines() - MAX_REFLOW_LINES;
+    }
+    while (currentPos < getLines()) {
+        qint64 startLine = startOfLine(currentPos);
+        qint64 endLine = startOfLine(currentPos + 1);
+
+        // Join the lines if they are wrapped
+        while (isWrappedLine(currentPos)) {
+            currentPos++;
+            endLine = startOfLine(currentPos + 1);
+        }
+
+        // Now reflow the lines
+        while (reflowLineLen(startLine, endLine) > columns) {
+            startLine += (qint64)columns * sizeof(Character);
+            setNewLine(newLine, startLine, true);
+            reflowFile->add(reinterpret_cast<const unsigned char *>(&newLine), sizeof(reflowData));
+        }
+        setNewLine(newLine, endLine, false);
+        reflowFile->add(reinterpret_cast<const unsigned char *>(&newLine), sizeof(reflowData));
+        currentPos++;
+    }
+
+    // Erase data from index and flag data
+    if (getLines() > MAX_REFLOW_LINES) {
+        currentPos = getLines() - MAX_REFLOW_LINES;
+        index.removeLast(currentPos * sizeof(qint64));
+        lineflags.removeLast(currentPos * sizeof(char));
+    } else {
+        index.removeLast(0);
+        lineflags.removeLast(0);
+    }
+
+    // Now save the new indexes and properties to proper files
+    int totalLines = reflowFile->len() / sizeof(reflowData);
+    currentPos = 0;
+    while (currentPos < totalLines) {
+        reflowFile->get(reinterpret_cast<unsigned char *>(&newLine), sizeof(reflowData), currentPos * sizeof(reflowData));
+
+        unsigned char flags = newLine.lineFlag ? 0x01 : 0x00;
+        lineflags.add(reinterpret_cast<unsigned char *>(&flags), sizeof(char));
+        index.add(reinterpret_cast<unsigned char *>(&newLine.index), sizeof(qint64));
+        currentPos++;
+    }
+
+    delete reflowFile;
+    return 0;
+}
 
 // History Scroll Buffer //////////////////////////////////////
 HistoryScrollBuffer::HistoryScrollBuffer(unsigned int maxLineCount)
@@ -328,6 +441,11 @@ void HistoryScrollBuffer::addLine(bool previousWrapped)
 int HistoryScrollBuffer::getLines()
 {
     return _usedLines;
+}
+
+int HistoryScrollBuffer::getMaxLines()
+{
+    return _maxLineCount;
 }
 
 int HistoryScrollBuffer::getLineLen(int lineNumber)
@@ -461,7 +579,7 @@ void HistoryScrollNone::addLine(bool)
 {
 }
 
-// History Scroll BlockArray //////////////////////////////////////
+// History Scroll BlockArray
 
 HistoryScrollBlockArray::HistoryScrollBlockArray(size_t size)
   : HistoryScroll(new HistoryTypeBlockArray(size))
@@ -478,6 +596,11 @@ int  HistoryScrollBlockArray::getLines()
   return m_lineLengths.count();
 }
 
+int  HistoryScrollBlockArray::getMaxLines()
+{
+    return getLines();
+}
+
 int  HistoryScrollBlockArray::getLineLen(int lineno)
 {
     if ( m_lineLengths.contains(lineno) )
@@ -489,6 +612,11 @@ int  HistoryScrollBlockArray::getLineLen(int lineno)
 bool HistoryScrollBlockArray::isWrappedLine(int /*lineno*/)
 {
   return false;
+}
+
+LineProperty HistoryScrollBlockArray::getLineProperty(int lineno)
+{
+
 }
 
 void HistoryScrollBlockArray::getCells(int lineno, int colno,
@@ -528,8 +656,9 @@ void HistoryScrollBlockArray::addCells(const Character a[], int count)
   m_lineLengths.insert(m_blockArray.getCurrent(), count);
 }
 
-void HistoryScrollBlockArray::addLine(bool)
+void HistoryScrollBlockArray::addLine(bool previousWrapped)
 {
+
 }
 
 ////////////////////////////////////////////////////////////////
@@ -728,6 +857,29 @@ void CompactHistoryScroll::addCellsVector ( const TextLine& cells )
   lines.append ( line );
 }
 
+void CompactHistoryScroll::removeFirstLine()
+{
+    _flags.pop_front();
+
+    auto removing = _index.first();
+    _index.pop_front();
+    std::transform(_index.begin(), _index.end(), _index.begin(), [removing](int i) { return i - removing; });
+
+    while (_cells.size() > _index.last()) {
+        _cells.pop_front();
+    }
+}
+
+inline int CompactHistoryScroll::lineLen(int line)
+{
+    return line == 0 ? _index[0] : _index[line] - _index[line - 1];
+}
+
+inline int CompactHistoryScroll::startOfLine(int line)
+{
+    return line == 0 ? 0 : _index[line - 1];
+}
+
 void CompactHistoryScroll::addCells ( const Character a[], int count )
 {
   TextLine newLine ( count );
@@ -745,6 +897,11 @@ void CompactHistoryScroll::addLine ( bool previousWrapped )
 int CompactHistoryScroll::getLines()
 {
   return lines.size();
+}
+
+int CompactHistoryScroll::getMaxLines()
+{
+    return _maxLineCount;
 }
 
 int CompactHistoryScroll::getLineLen ( int lineNumber )
@@ -776,12 +933,77 @@ void CompactHistoryScroll::setMaxNbLines ( unsigned int lineCount )
   //kDebug() << "set max lines to: " << _maxLineCount;
 }
 
+void CompactHistoryScroll::removeCells()
+{
+    if (_index.size() > 1) {
+        _index.pop_back();
+        _flags.pop_back();
+
+        while (_cells.size() > _index.last()) {
+            _cells.pop_back();
+        }
+    } else {
+        _cells.clear();
+        _index.clear();
+        _flags.clear();
+    }
+}
+
 bool CompactHistoryScroll::isWrappedLine ( int lineNumber )
 {
   Q_ASSERT ( lineNumber < lines.size() );
   return lines[lineNumber]->isWrapped();
 }
 
+LineProperty CompactHistoryScroll::getLineProperty(int lineNumber)
+{
+    Q_ASSERT(lineNumber < _index.size());
+    return _flags[lineNumber];
+}
+
+int CompactHistoryScroll::reflowLines(int columns)
+{
+    reflowsData newLine;
+
+    auto reflowLineLen = [](int start, int end) {
+        return end - start;
+    };
+    auto setNewLine = [](reflowsData &change, int index, LineProperty flag) {
+        change.index.append(index);
+        change.flags.append(flag);
+    };
+
+    int currentPos = 0;
+    while (currentPos < getLines()) {
+        int startLine = startOfLine(currentPos);
+        int endLine = startOfLine(currentPos + 1);
+        LineProperty lineProperty = getLineProperty(currentPos);
+
+        // Join the lines if they are wrapped
+        while (isWrappedLine(currentPos)) {
+            currentPos++;
+            endLine = startOfLine(currentPos + 1);
+        }
+
+        // Now reflow the lines
+        while (reflowLineLen(startLine, endLine) > columns && !(lineProperty & (LINE_DOUBLEHEIGHT_BOTTOM | LINE_DOUBLEHEIGHT_TOP))) {
+            startLine += columns;
+            setNewLine(newLine, startLine, lineProperty | LINE_WRAPPED);
+        }
+        setNewLine(newLine, endLine, lineProperty & ~LINE_WRAPPED);
+        currentPos++;
+    }
+    _index = newLine.index;
+    _flags = newLine.flags;
+
+    int deletedLines = 0;
+    while (getLines() > _maxLineCount) {
+        removeFirstLine();
+        ++deletedLines;
+    }
+
+    return deletedLines;
+}
 
 //////////////////////////////////////////////////////////////////////
 // History Types

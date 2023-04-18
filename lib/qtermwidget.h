@@ -20,10 +20,15 @@
 #ifndef _Q_TERM_WIDGET
 #define _Q_TERM_WIDGET
 
+#include <QPointer>
 #include <QTranslator>
 #include <QWidget>
+#include <QPointer>
 #include "Emulation.h"
 #include "Filter.h"
+#include "HistorySearch.h"
+#include "Screen.h"
+
 #include "qtermwidget_export.h"
 #include "qtermwidget_version.h"
 #include "qtermwidget_interface.h"
@@ -32,6 +37,9 @@ class QVBoxLayout;
 class TermWidgetImpl;
 class SearchBar;
 class QUrl;
+namespace Konsole {
+class TerminalDisplay;
+}
 
 class QTERMWIDGET_EXPORT QTermWidget : public QWidget, public QTermWidgetInterface {
     Q_OBJECT
@@ -39,7 +47,6 @@ class QTERMWIDGET_EXPORT QTermWidget : public QWidget, public QTermWidgetInterfa
     Q_INTERFACES(QTermWidgetInterface)
 
 public:
-
     using KeyboardCursorShape = Konsole::Emulation::KeyboardCursorShape;
 
     //Creation of widget
@@ -60,6 +67,12 @@ public:
     //start shell program if it was not started in constructor
     void startShellProgram() override;
 
+    // Returns session id list of processes running in the terminal window
+        QList<int> getRunningSessionIdList();
+
+    // Determine whether the terminal control has running process
+    bool hasRunningProcess();
+
     /**
      * Start terminal teletype as is
      * and redirect data for external recipient.
@@ -69,9 +82,12 @@ public:
 
     int getShellPID() override;
 
+    // Get current terminal's session id
+    int getSessionId();
+    
     void changeDir(const QString & dir) override;
 
-    //look-n-feel, if you don`t like defaults
+    // look-n-feel, if you don`t like defaults
 
     //  Terminal font
     // Default is application font with family Monospace, size 10
@@ -103,6 +119,7 @@ public:
      * @param[in] name The name of the color scheme, either returned from
      * availableColorSchemes() or a full path to a color scheme.
      */
+    void setColorScheme(const QString & name, bool needReloadTheme);
     void setColorScheme(const QString & name) override;
 
     /**
@@ -128,10 +145,14 @@ public:
     int historySize() const override;
 
     // Presence of scrollbar
-    void setScrollBarPosition(QTermWidgetInterface::ScrollBarPosition) override;
+    void setScrollBarPosition(ScrollBarPosition) override;
 
     // Wrapped, scroll to end.
     void scrollToEnd() override;
+
+    /******** Modify by n014361 wangpeili 2020-02-17:设置当前屏幕是否滚动****************/
+    void setTrackOutput(bool enable);
+    /********************* Modify by n014361 wangpeili End ************************/
 
     // Send some text to terminal
     void sendText(const QString & text) override;
@@ -166,17 +187,28 @@ public:
     int screenColumnsCount() override;
     int screenLinesCount() override;
 
+    /******** Modify by n014361 wangpeili 2020-02-13: 新增屏幕全选功能***********×****/
+    void setSelectionAll();
     void setSelectionStart(int row, int column) override;
     void setSelectionEnd(int row, int column) override;
     void getSelectionStart(int& row, int& column) override;
     void getSelectionEnd(int& row, int& column) override;
+
+    char getErase();
+    /********************* Modify by ut000610 daizhengwen End ************************/
+
+    // 设置删除键模式（修改内存接口）
+    void setDeleteMode(char *key, int length);
+    // 设置退格按键模式（用户选择接口）
+    void setBackspaceMode(char *key, int length);
 
     /**
      * Returns the currently selected text.
      * @param preserveLineBreaks Specifies whether new line characters should
      * be inserted into the returned text at the end of each terminal line.
      */
-    QString selectedText(bool preserveLineBreaks = true) override;
+    QString selectedText(bool preserveLineBreaks) override;
+    QString selectedText(const Screen::DecodingOptions options=Screen::PreserveLineBreaks);
 
     void setMonitorActivity(bool) override;
     void setMonitorSilence(bool) override;
@@ -246,20 +278,37 @@ public:
     /** Get the empty space outside the terminal */
     int getMargin() const override;
 
+    /** Get the foreground pid in terminal */
+    int getForegroundProcessId() const;
+
+    // 获取foreground名称
+    QString getForegroundProcessName() const;
+
     void setDrawLineChars(bool drawLineChars) override;
 
     void setBoldIntense(bool boldIntense) override;
 
     void setConfirmMultilinePaste(bool confirmMultilinePaste) override;
     void setTrimPastedTrailingNewlines(bool trimPastedTrailingNewlines) override;
+ 
+    // 获取是否允许输出时滚动
+    bool getIsAllowScroll() const;
+
+    // 设置是否允许输出时滚动
+    void setIsAllowScroll(bool isAllowScroll);
+    //Add by ut001000 renfeixiang 2020-12-02 当搜索框出现时，设置m_bHasSelect为false,
+    //避免搜索框隐藏再显示之后，继续走m_bHasSelect为true流程，导致崩溃
+    void setNoHasSelect();
 
     QTermWidgetInterface *createWidget(int startnow) const override;
+
 signals:
     void finished();
     void copyAvailable(bool);
 
     void termGetFocus();
     void termLostFocus();
+    void leftMouseClick();
 
     void termKeyPressed(QKeyEvent *);
 
@@ -270,22 +319,48 @@ signals:
     void activity();
     void silence();
 
+    /******** Modify by nt001000 renfeixiang 2020-05-27:修改 增加参数区别remove和purge卸载命令 Begin***************/
+    bool uninstallTerminal(QString commandname);
+    /******** Modify by nt001000 renfeixiang 2020-05-27:修改 增加参数区别remove和purge卸载命令 Begin***************/
+
+    /******** Modify by ut000610 daizhengwen 2020-06-11: QProcess start finished signal****************/
+    void processStarted();
+    /********************* Modify by ut000610 daizhengwen End ************************/
+
+    /******** Modify by ut000610 daizhengwen 2020-09-03:将拖拽过来的数据传送给终端 Begin***************/
+    void sendUrlsToTerm(const char *);
+    /********************* Modify by ut000610 daizhengwen End ************************/
     /**
      * Emitted when emulator send data to the terminal process
      * (redirected for external recipient). It can be used for
      * control and display the remote terminal.
      */
-    void sendData(const char *,int);
+    void sendData(const char *, int, const QTextCodec *);
 
     void profileChanged(const QString & profile);
 
     void titleChanged();
+
+    // warning提示信息 currentShell当前使用的shell, 启用shell是否成功 true 替换了shell false 替换shell但启动失败
+    void shellWarningMessage(QString currentShell, bool isSuccess);
 
     /**
      * Signals that we received new data from the process running in the
      * terminal emulator
      */
     void receivedData(const QString &text);
+
+    /**
+     * Signals for dynamically determine whether current terminal is busy or idle
+     */
+    void isTermIdle(bool bIdle);
+    // 将库里返回信号透传出来。原来的no方法改名为clearSelection
+    void sig_no();
+    // 找到的信号
+    void sig_();
+
+    // 标签标题参数改变 dzw 2020-12-2
+    void titleArgsChange(QString key, QString value);
 
 public slots:
     // Copy selection to clipboard
@@ -313,6 +388,11 @@ public slots:
     void clear();
 
     void toggleShowSearchBar();
+    // 清除选中框
+    void clearSelection();
+
+    void noMatchFound();
+    /********************* Modify by n014361 wangpeili End ************************/
 
     void saveHistory(QIODevice *device);
 protected:
@@ -327,21 +407,35 @@ private slots:
     void findNext();
     void findPrevious();
     void matchFound(int startColumn, int startLine, int endColumn, int endLine);
-    void noMatchFound();
     /**
      * Emulation::cursorChanged() signal propagates to here and QTermWidget
      * sends the specified cursor states to the terminal display
      */
     void cursorChanged(Konsole::Emulation::KeyboardCursorShape cursorShape, bool blinkingCursorEnabled);
+    void snapshot();
 
 private:
     void search(bool forwards, bool next);
     void setZoom(int step);
     void init(int startnow);
-    TermWidgetImpl * m_impl;
-    SearchBar* m_searchBar;
+    void addSnapShotTimer();
+    void interactionHandler();
+
+    TermWidgetImpl *m_impl;
+    SearchBar *m_searchBar;
     QVBoxLayout *m_layout;
-    QTranslator *m_translator;
+    static QTranslator *m_translator;
+    QPointer<Konsole::TerminalDisplay> m_termDisplay;
+    QTimer *m_interactionTimer = nullptr;
+
+    bool m_bHasSelect = false;
+    int m_startColumn = 0;
+    int m_startLine = 0;
+    int m_endColumn = 0;
+    int m_endLine = 0;
+    int m_lastBackwardsPosition = -1;
+    //上一次是正向搜索还是反向搜索
+    bool m_isLastForwards = false;
 };
 
 

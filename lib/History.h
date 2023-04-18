@@ -23,6 +23,7 @@
 
 // Qt
 #include <QBitRef>
+#include <QDebug>
 #include <QHash>
 #include <QVector>
 #include <QTemporaryFile>
@@ -53,6 +54,7 @@ public:
 
   virtual void add(const unsigned char* bytes, int len);
   virtual void get(unsigned char* bytes, int len, int loc);
+  virtual void removeLast(qint64 loc);
   virtual int  len();
 
   //mmaps the file in read-only mode
@@ -93,15 +95,17 @@ class HistoryScroll
 {
 public:
   HistoryScroll(HistoryType*);
- virtual ~HistoryScroll();
+  virtual ~HistoryScroll();
 
   virtual bool hasScroll();
 
   // access to history
   virtual int  getLines() = 0;
+  virtual int getMaxLines() = 0;
   virtual int  getLineLen(int lineno) = 0;
   virtual void getCells(int lineno, int colno, int count, Character res[]) = 0;
   virtual bool isWrappedLine(int lineno) = 0;
+  virtual LineProperty getLineProperty(int lineno) = 0;
 
   // backward compatibility (obsolete)
   Character   getCell(int lineno, int colno) { Character res; getCells(lineno,colno,1,&res); return res; }
@@ -115,8 +119,17 @@ public:
     addCells(cells.data(),cells.size());
   }
 
-  virtual void addLine(bool previousWrapped=false) = 0;
+  virtual void addLine(bool previousWrapped=false) {
+      qInfo() << "Unimplemented method: addLine in class " << qt_getQtMetaObject()->className();
+  }
 
+  // modify history
+  virtual void removeCells() {
+      qInfo() << "Unimplemented method: removeCells in class " << qt_getQtMetaObject()->className();
+  }
+  virtual int reflowLines(int columns) {
+      qInfo() << "Unimplemented method: reflowLines in class " << qt_getQtMetaObject()->className();
+  }
   //
   // FIXME:  Passing around constant references to HistoryType instances
   // is very unsafe, because those references will no longer
@@ -126,7 +139,7 @@ public:
 
 protected:
   HistoryType* m_histType;
-
+  const int MAX_REFLOW_LINES = 20000;
 };
 
 #if 1
@@ -142,12 +155,16 @@ public:
   ~HistoryScrollFile() override;
 
   int  getLines() override;
+  int  getMaxLines() override;
   int  getLineLen(int lineno) override;
   void getCells(int lineno, int colno, int count, Character res[]) override;
   bool isWrappedLine(int lineno) override;
+  LineProperty getLineProperty(int lineno) override;
 
   void addCells(const Character a[], int count) override;
   void addLine(bool previousWrapped=false) override;
+  void removeCells() override;
+  int reflowLines(int columns) override;
 
 private:
   int startOfLine(int lineno);
@@ -171,13 +188,17 @@ public:
   ~HistoryScrollBuffer() override;
 
   int  getLines() override;
+  int  getMaxLines() override;
   int  getLineLen(int lineno) override;
   void getCells(int lineno, int colno, int count, Character res[]) override;
   bool isWrappedLine(int lineno) override;
+  LineProperty getLineProperty(int lineNumber) override {}
 
   void addCells(const Character a[], int count) override;
   void addCellsVector(const QVector<Character>& cells) override;
   void addLine(bool previousWrapped=false) override;
+//  void removeCells() override;
+//  int reflowLines(int columns) override;
 
   void setMaxNbLines(unsigned int nbLines);
   unsigned int maxNbLines() const { return _maxLineCount; }
@@ -192,12 +213,12 @@ private:
   int _usedLines;
   int _head;
 
-  //QVector<histline*> m_histBuffer;
-  //QBitArray m_wrappedLine;
-  //unsigned int m_maxNbLines;
-  //unsigned int m_nbLines;
-  //unsigned int m_arrayIndex;
-  //bool         m_buffFilled;
+//  QVector<histline*> m_histBuffer;
+//  QBitArray m_wrappedLine;
+//  unsigned int m_maxNbLines;
+//  unsigned int m_nbLines;
+//  unsigned int m_arrayIndex;
+//  bool         m_buffFilled;
 };
 
 /*class HistoryScrollBufferV2 : public HistoryScroll
@@ -228,12 +249,16 @@ public:
   bool hasScroll() override;
 
   int  getLines() override;
+  int getMaxLines() override { return 0; }
   int  getLineLen(int lineno) override;
   void getCells(int lineno, int colno, int count, Character res[]) override;
   bool isWrappedLine(int lineno) override;
+  LineProperty getLineProperty(int lineno) override { return 0; }
 
   void addCells(const Character a[], int count) override;
   void addLine(bool previousWrapped=false) override;
+  void removeCells() override {}
+  int reflowLines(int columns) override { return 0; }
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -246,12 +271,16 @@ public:
   ~HistoryScrollBlockArray() override;
 
   int  getLines() override;
+  int  getMaxLines() override;
   int  getLineLen(int lineno) override;
   void getCells(int lineno, int colno, int count, Character res[]) override;
   bool isWrappedLine(int lineno) override;
+  LineProperty getLineProperty(int lineno) override;
 
   void addCells(const Character a[], int count) override;
   void addLine(bool previousWrapped=false) override;
+//  void removeCells() override;
+//  int  reflowLines(int columns) override;
 
 protected:
   BlockArray m_blockArray;
@@ -366,13 +395,17 @@ public:
   ~CompactHistoryScroll() override;
 
   int  getLines() override;
+  int  getMaxLines() override;
   int  getLineLen(int lineno) override;
   void getCells(int lineno, int colno, int count, Character res[]) override;
   bool isWrappedLine(int lineno) override;
+  LineProperty getLineProperty(int lineNumber) override;
 
   void addCells(const Character a[], int count) override;
   void addCellsVector(const TextLine& cells) override;
   void addLine(bool previousWrapped=false) override;
+  void removeCells() override;
+  int reflowLines(int columns) override;
 
   void setMaxNbLines(unsigned int nbLines);
   unsigned int maxNbLines() const { return _maxLineCount; }
@@ -382,7 +415,15 @@ private:
   HistoryArray lines;
   CompactHistoryBlockList blockList;
 
+  QList<Character> _cells;
+  QList<int> _index;
+  QList<LineProperty> _flags;
+
   unsigned int _maxLineCount;
+
+  void removeFirstLine();
+  inline int lineLen(const int line);
+  inline int startOfLine(int line);
 };
 
 //////////////////////////////////////////////////////////////////////

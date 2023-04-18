@@ -17,4 +17,7 @@ int konsole_wcwidth(wchar_t ucs);
 
 int string_width( const std::wstring & wstr );
 
+
+int characterWidth(uint ucs4);
+
 #endif

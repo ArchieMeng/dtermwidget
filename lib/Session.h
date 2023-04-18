@@ -30,14 +30,15 @@
 
 #include "Emulation.h"
 #include "History.h"
+#include "ProcessInfo.h"
 
 class KProcess;
 
 namespace Konsole {
 
-class Emulation;
 class Pty;
 class TerminalDisplay;
+//class ProcessInfo;
 //class ZModemDialog;
 
 /**
@@ -254,6 +255,11 @@ public:
     /** Returns the name of the key bindings used by this session. */
     QString keyBindings() const;
 
+    /******** Modify by ut000610 daizhengwen 2020-06-02: 设置删除和退格按钮****************/
+    void setBackspaceMode(char *key, int length);
+    void setDeleteMode(char *key, int length);
+    /********************* Modify by ut000610 daizhengwen End ************************/
+
     /**
      * This enum describes the available title roles.
      */
@@ -316,6 +322,12 @@ public:
 
     void sendKeyEvent(QKeyEvent* e) const;
 
+    /** Returns dynamic process name. */
+    QString getDynamicProcessName();
+
+    /** Returns dynamic process id */
+    int getDynamicProcessId();
+
     /**
      * Returns the process id of the terminal process.
      * This is the id used by the system API to refer to the process.
@@ -323,11 +335,28 @@ public:
     int processId() const;
 
     /**
+     * Returns foreground process's name
+     */
+    QString foregroundProcessName();
+
+    /**
+     * Get process info of current Session
+     */
+    ProcessInfo *getProcessInfo();
+
+    void updateSessionProcessInfo();
+    bool updateForegroundProcessInfo();
+    void updateWorkingDirectory();
+
+    /**
      * Returns the process id of the terminal's foreground process.
      * This is initially the same as processId() but can change
      * as the user starts other programs inside the terminal.
      */
-    int foregroundProcessId() const;
+    int foregroundProcessId();
+
+    /** Returns true if the user has started a program in the session. */
+    bool isForegroundProcessActive();
 
     /** Returns the terminal session's window size in lines and columns. */
     QSize size();
@@ -374,6 +403,13 @@ public:
      * a remote terminal.
      */
     int getPtySlaveFd() const;
+
+    // 获取此时tty的eraseChar
+    char getEraseChar();
+
+    // Returns true if the current screen is the secondary/alternate one
+    // or false if it's the primary/normal buffer
+    bool isPrimaryScreen();
 
 public slots:
 
@@ -434,6 +470,13 @@ signals:
      */
     void stateChanged(int state);
 
+    /**
+     * Emitted when the current working directory of this session changes.
+     *
+     * @param dir The new current working directory of the session.
+     */
+    void currentDirectoryChanged(const QString &dir);
+
     /** Emitted when a bell event occurs in the session. */
     void bellRequest( const QString & message );
 
@@ -481,6 +524,15 @@ signals:
     void flowControlEnabledChanged(bool enabled);
 
     /**
+     * Emitted when the active screen is switched, to indicate whether the primary
+     * screen is in use.
+     *
+     * This signal serves as a relayer of Emulation::priamyScreenInUse(bool),
+     * making it usable for higher level component.
+     */
+    void primaryScreenInUse(bool use);
+
+    /**
      * Broker for Emulation::cursorChanged() signal
      */
     void cursorChanged(Emulation::KeyboardCursorShape cursorShape, bool blinkingCursorEnabled);
@@ -488,12 +540,22 @@ signals:
     void silence();
     void activity();
 
+    /******** Modify by nt001000 renfeixiang 2020-05-27:修改 增加参数区别remove和purge卸载命令 Begin***************/
+    bool sessionUninstallTerminal(QString commandname);
+    /******** Modify by nt001000 renfeixiang 2020-05-27:修改 增加参数区别remove和purge卸载命令 end***************/
+
+    // 标签标题参数改变 dzw 2020-12-2
+    void titleArgsChange(QString key, QString value);
+
+    // warning提示信息 currentShell当前使用的shell, 启用shell是否成功 true 替换了shell false 替换shell但启动失败
+    void shellWarningMessage(QString currentShell, bool isSuccess);
+
 private slots:
     void done(int);
 
 //  void fireZModemDetected();
 
-    void onReceiveBlock( const char * buffer, int len );
+    void onReceiveBlock(const char * buffer, int len, bool isCommandExec);
     void monitorTimerDone();
 
     void onViewSizeChange(int height, int width);
@@ -509,9 +571,14 @@ private slots:
 //  void zmodemRcvBlock(const char *data, int len);
 //  void zmodemFinished();
 
+    // 目前为了更新标签标题信息
+    void onUpdateTitleArgs();
+
+    // Relays the signal from Emulation and sets _isPrimaryScreen
+    void onPrimaryScreenInUse(bool use);
 private:
 
-    void updateTerminalSize();
+    void updateTerminalSize(int height, int width);
     WId windowId() const;
 
     int            _uniqueIdentifier;
@@ -552,6 +619,12 @@ private:
     int            _sessionId;
 
     QString        _initialWorkingDir;
+    QString        _currentWorkingDir;
+    QUrl           _reportedWorkingUrl;
+
+    ProcessInfo   *_sessionProcessInfo = nullptr;
+    ProcessInfo   *_foregroundProcessInfo = nullptr;
+    int            _foregroundPid;
 
     // ZModem
 //  bool           _zmodemBusy;
@@ -570,6 +643,13 @@ private:
 
     int ptySlaveFd;
 
+    // title format args
+    QString _userName;
+    QString _currentDir;
+    QString _programName;
+
+    QTimer *_updateTimer = nullptr;
+    bool _isPrimaryScreen;
 };
 
 /**

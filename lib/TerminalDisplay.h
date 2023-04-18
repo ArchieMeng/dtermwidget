@@ -31,6 +31,20 @@
 #include "Character.h"
 #include "qtermwidget.h"
 //#include "konsole_export.h"
+#include "tools.h"
+
+#include <QGesture>
+#include <QPanGesture>
+#include <QSwipeGesture>
+#include <QPinchGesture>
+#include <QTapAndHoldGesture>
+#include <QGestureEvent>
+
+#include <math.h>
+#define CELL_TIME   15
+#define TAP_MOVE_DELAY 300
+
+//#include "konsole_export.h"
 #define KONSOLEPRIVATE_EXPORT
 
 class QDrag;
@@ -336,6 +350,8 @@ public:
 
     void setSelection(const QString &t);
 
+    void setSelectionAll();
+
     /**
      * Reimplemented.  Has no effect.  Use setVTFont() to change the font
      * used to draw characters in the display.
@@ -430,8 +446,16 @@ public:
     // of the character at that point.
     void getCharacterPosition(const QPointF& widgetPoint,int& line,int& column) const;
 
+    void setHideCursor(bool hideCursor);
+
     void disableBracketedPasteMode(bool disable) { _disabledBracketedPasteMode = disable; }
     bool bracketedPasteModeIsDisabled() const { return _disabledBracketedPasteMode; }
+    void setSessionId(int sessionId);
+
+    // 获取是否允许输出时滚动
+    bool getIsAllowScroll() const;
+    // 设置是否允许输出时滚动
+    void setIsAllowScroll(bool isAllowScroll);
 
 public slots:
 
@@ -502,6 +526,15 @@ public slots:
      */
     void setUsesMouse(bool usesMouse);
 
+    /**
+     * Sets the AlternateScrolling profile property which controls whether
+     * to emulate up/down key presses for mouse scroll wheel events.
+     * For more details, check the documentation of that property in the
+     * Profile header.
+     * Enabled by default.
+     */
+    void setAlternateScrolling(bool enable);
+
     /** See setUsesMouse() */
     bool usesMouse() const;
 
@@ -527,6 +560,11 @@ public slots:
     void setForegroundColor(const QColor& color);
 
     void selectionChanged();
+
+    void selectionCleared();
+
+    // 隐藏QScrollBar默认的右键菜单
+    void hideQScrollBarRightMenu();
 
 signals:
 
@@ -572,6 +610,7 @@ signals:
 	void copyAvailable(bool);
 	void termGetFocus();
 	void termLostFocus();
+    void leftMouseClick();
 
     void notifyBell(const QString&);
     void usesMouseChanged();
@@ -589,6 +628,7 @@ protected:
     void focusInEvent(QFocusEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent* ev) override;
     void mousePressEvent( QMouseEvent* ) override;
     void mouseReleaseEvent( QMouseEvent* ) override;
@@ -602,6 +642,10 @@ protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
     void doDrag();
+    void initSelectionStates();
+    void initKeyBoardSelection();
+    void checkAndInitSelectionState();
+
     enum DragState { diNone, diPending, diDragging };
 
     struct _dragInfo {
@@ -620,6 +664,7 @@ protected:
 
     void clearImage();
 
+    Screen::DecodingOptions currentDecodingOptions();
     void mouseTripleClickEvent(QMouseEvent* ev);
 
     // reimplemented
@@ -681,6 +726,7 @@ private:
 
     // maps an area in the character image to an area on the widget
     QRect imageToWidget(const QRect& imageArea) const;
+    QRect widgetToImage(const QRect& widgetArea) const;
 
     // the area where the preedit string for input methods will be draw
     QRect preeditRect() const;
@@ -754,6 +800,8 @@ private:
                      // than 'columns' if the character image provided with setImage() is smaller
                      // than the maximum image size which can be displayed
 
+    QRect _contentRect;
+
     int _contentHeight;
     int _contentWidth;
     Character* _image; // [lines][columns]
@@ -770,6 +818,7 @@ private:
     bool _terminalSizeStartup;
     bool _bidiEnabled;
     bool _mouseMarks;
+    bool _alternateScrolling;
     bool _bracketedPasteMode;
     bool _disabledBracketedPasteMode;
 
@@ -807,10 +856,12 @@ private:
                                // after QApplication::doubleClickInterval() delay
 
 
+    bool m_bUserIsResizing;  //用于判断当前控件是否正在resize
     QLabel* _resizeWidget;
     QTimer* _resizeTimer;
 
     bool _flowControlWarningEnabled;
+    bool _hideCursor;
 
     //widgets related to the warning message that appears when the user presses Ctrl+S to suspend
     //terminal output - informing them what has happened and how to resume output
@@ -855,16 +906,40 @@ private:
     //the delay in milliseconds between redrawing blinking text
     static const int TEXT_BLINK_DELAY = 500;
 
+    int _margin;      // the contents margin
+    bool _centerContents;   // center the contents between margins
+
     int _leftBaseMargin;
     int _topBaseMargin;
 
+    int _sessionId;
     bool _drawLineChars;
+
+    //TerminalHeaderBar *_headerBar;
+
+    int _selStartLine = 0;
+    int _selStartColumn = 0;
+    int _selEndLine = 0;
+    int _selEndColumn = 0;
+
+    int _lastLeftEndColumn = 0;
+    int _lastLeftEndLine = 0;
+    int _lastRightEndColumn = 0;
+    int _lastRightEndLine = 0;
+    int _lastEndColumn = 0;
+
+    bool _selBegin = false;
+
+    // 当前窗口是否允许输出时回滚的标志位
+    bool m_isAllowScroll = true;
 
 public:
     static void setTransparencyEnabled(bool enable)
     {
         HAVE_TRANSPARENCY = enable;
     }
+
+    QScrollBar* getScrollBar() {return _scrollBar;}
 };
 
 class AutoScrollHandler : public QObject

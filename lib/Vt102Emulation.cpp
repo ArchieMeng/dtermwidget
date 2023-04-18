@@ -865,9 +865,9 @@ void Vt102Emulation::clearScreenAndSetColumns(int columnCount)
 void Vt102Emulation::sendString(const char* s , int length)
 {
   if ( length >= 0 )
-    emit sendData(s,length);
+    emit sendData(s, length, _codec);
   else
-    emit sendData(s,strlen(s));
+    emit sendData(s, static_cast<int>(strlen(s)), _codec);
 }
 
 void Vt102Emulation::reportCursorPosition()
@@ -1112,7 +1112,7 @@ void Vt102Emulation::sendKeyEvent(QKeyEvent* event, bool fromPaste)
         if (!fromPaste && textToSend.length()) {
             Q_EMIT outputFromKeypressEvent();
         }
-        Q_EMIT sendData( textToSend.constData() , textToSend.length() );
+        Q_EMIT sendData( textToSend.constData() , textToSend.length(), _codec);
     }
     else
     {
@@ -1123,7 +1123,7 @@ void Vt102Emulation::sendKeyEvent(QKeyEvent* event, bool fromPaste)
                                          "into characters to send to the terminal "
                                          "is missing.");
         reset();
-        receiveData( translatorError.toUtf8().constData() , translatorError.count() );
+        receiveData( translatorError.toUtf8().constData() , translatorError.count(), false );
     }
 }
 

@@ -28,6 +28,7 @@
 
 // Local
 #include "CharacterColor.h"
+#include "konsole_wcwidth.h"
 
 namespace Konsole
 {
@@ -38,6 +39,9 @@ static const int LINE_DEFAULT        = 0;
 static const int LINE_WRAPPED          = (1 << 0);
 static const int LINE_DOUBLEWIDTH      = (1 << 1);
 static const int LINE_DOUBLEHEIGHT    = (1 << 2);
+
+static const int LINE_DOUBLEHEIGHT_TOP    = (1 << 2);
+static const int LINE_DOUBLEHEIGHT_BOTTOM = (1 << 3);
 
 #define DEFAULT_RENDITION  0
 #define RE_BOLD            (1 << 0)
@@ -124,6 +128,27 @@ public:
    * renditions or colors.
    */
   friend bool operator != (const Character& a, const Character& b);
+
+    inline int width() const {
+        return width(character);
+    }
+
+    static int width(uint ucs4) {
+        return characterWidth(ucs4);
+    }
+
+    static int stringWidth(const uint *ucs4Str, int len) {
+        int w = 0;
+        for (int i = 0; i < len; ++i) {
+            w += width(ucs4Str[i]);
+        }
+        return w;
+    }
+
+    inline static int stringWidth(const QString &str) {
+        QVector<uint> ucs4Str = str.toUcs4();
+        return stringWidth(ucs4Str.constData(), ucs4Str.length());
+    }
 };
 
 inline bool operator == (const Character& a, const Character& b)

@@ -36,8 +36,9 @@
 #include <QRegExp>
 #include <QTextStream>
 #include <QThread>
-
+#include <QList>
 #include <QTime>
+#include <QDebug>
 
 // KDE
 //#include <kdebug.h>
@@ -47,6 +48,9 @@
 #include "Screen.h"
 #include "TerminalCharacterDecoder.h"
 #include "ScreenWindow.h"
+#include "Session.h"
+#include "SessionManager.h"
+#include "TerminalDisplay.h"
 
 using namespace Konsole;
 
@@ -56,6 +60,7 @@ Emulation::Emulation() :
   _decoder(nullptr),
   _keyTranslator(nullptr),
   _usesMouse(false),
+  _alternateScrolling(true),
   _bracketedPasteMode(false)
 {
   // create screens with a default size
@@ -88,6 +93,11 @@ void Emulation::usesMouseChanged(bool usesMouse)
     _usesMouse = usesMouse;
 }
 
+void Emulation::setAlternateScrolling(bool enable)
+{
+    _alternateScrolling = enable;
+}
+
 bool Emulation::programBracketedPasteMode() const
 {
     return _bracketedPasteMode;
@@ -118,6 +128,11 @@ ScreenWindow* Emulation::createWindow()
     return window;
 }
 
+void Emulation::checkScreenInUse()
+{
+    emit primaryScreenInUse(_currentScreen == _screen[0]);
+}
+
 Emulation::~Emulation()
 {
   QListIterator<ScreenWindow*> windowIter(_windows);
@@ -130,6 +145,11 @@ Emulation::~Emulation()
   delete _screen[0];
   delete _screen[1];
   delete _decoder;
+
+  if (nullptr != _keyTranslator) {
+        delete _keyTranslator;
+        _keyTranslator = nullptr;
+    }
 }
 
 void Emulation::setScreen(int n)
@@ -181,6 +201,11 @@ void Emulation::setCodec(EmulationCodec codec)
         setCodec( QTextCodec::codecForLocale() );
 }
 
+void Emulation::setSessionId(int sessionId)
+{
+    _sessionId = sessionId;
+}
+
 void Emulation::setKeyBindings(const QString& name)
 {
   _keyTranslator = KeyboardTranslatorManager::instance()->findTranslator(name);
@@ -188,6 +213,52 @@ void Emulation::setKeyBindings(const QString& name)
   {
       _keyTranslator = KeyboardTranslatorManager::instance()->defaultTranslator();
   }
+}
+
+void Emulation::setBackspaceMode(char *key, int length)
+{
+    KeyboardTranslator::Entry entry = _keyTranslator->findEntry(
+                                          Qt::Key_Backspace,
+                                          Qt::NoModifier,
+                                          KeyboardTranslator::NoState);
+
+    KeyboardTranslator::Entry newEntry;
+    KeyboardTranslator::States flags = KeyboardTranslator::NoState;
+    KeyboardTranslator::States flagMask = KeyboardTranslator::NoState;
+    Qt::KeyboardModifiers modifiers = Qt::NoModifier;
+    Qt::KeyboardModifiers modifierMask = Qt::NoModifier;
+    KeyboardTranslator::Command command = KeyboardTranslator::NoCommand;
+    newEntry.setKeyCode(Qt::Key_Backspace);
+    newEntry.setState(flags);
+    newEntry.setStateMask(flagMask);
+    newEntry.setModifiers(modifiers);
+    newEntry.setModifierMask(modifierMask);
+    newEntry.setText(QByteArray(key, length));
+    newEntry.setCommand(command);
+    _keyTranslator->replaceEntry(entry, newEntry);
+}
+
+void Emulation::setDeleteMode(char *key, int length)
+{
+    KeyboardTranslator::Entry entry = _keyTranslator->findEntry(
+                                          Qt::Key_Delete,
+                                          Qt::NoModifier,
+                                          KeyboardTranslator::NoState);
+
+    KeyboardTranslator::Entry newEntry;
+    KeyboardTranslator::States flags = KeyboardTranslator::NoState;
+    KeyboardTranslator::States flagMask = KeyboardTranslator::NoState;
+    Qt::KeyboardModifiers modifiers = Qt::NoModifier;
+    Qt::KeyboardModifiers modifierMask = Qt::NoModifier;
+    KeyboardTranslator::Command command = KeyboardTranslator::NoCommand;
+    newEntry.setKeyCode(Qt::Key_Delete);
+    newEntry.setState(flags);
+    newEntry.setStateMask(flagMask);
+    newEntry.setModifiers(modifiers);
+    newEntry.setModifierMask(modifierMask);
+    newEntry.setText(QByteArray(key, length));
+    newEntry.setCommand(command);
+    _keyTranslator->replaceEntry(entry, newEntry);
 }
 
 QString Emulation::keyBindings() const
@@ -216,12 +287,12 @@ void Emulation::sendKeyEvent(QKeyEvent* ev, bool)
 {
   emit stateSet(NOTIFYNORMAL);
 
-  if (!ev->text().isEmpty())
-  { // A block of text
-    // Note that the text is proper unicode.
-    // We should do a conversion here
-    emit sendData(ev->text().toUtf8().constData(),ev->text().length());
-  }
+    if (!ev->text().isEmpty()) {
+        // A block of text
+        // Note that the text is proper unicode.
+        // We should do a conversion here
+        emit sendData(ev->text().toUtf8().constData(), ev->text().length(), _codec);
+    }
 }
 
 void Emulation::sendString(const char*,int)
@@ -239,7 +310,7 @@ void Emulation::sendMouseEvent(int /*buttons*/, int /*column*/, int /*row*/, int
 TODO: Character composition from the old code.  See #96536
 */
 
-void Emulation::receiveData(const char* text, int length)
+void Emulation::receiveData(const char *text, int length, bool isCommandExec)
 {
     emit stateSet(NOTIFYACTIVITY);
 
@@ -250,7 +321,39 @@ void Emulation::receiveData(const char* text, int length)
      * U+10FFFF
      * https://unicodebook.readthedocs.io/unicode_encodings.html#surrogates
      */
-    QString utf16Text = _decoder->toUnicode(text,length);
+    QString utf16Text = QStringLiteral("");
+
+    if (QString::fromUtf8(_codec->name()).toUpper().startsWith(QStringLiteral("GB")) && !isCommandExec) {
+        if (_decoder != nullptr) {
+            delete _decoder;
+        }
+        QTextCodec *textCodec = QTextCodec::codecForName("UTF-8");
+        _decoder = textCodec->makeDecoder();
+        utf16Text = _decoder->toUnicode(text, length);
+
+        QTextCodec* gbk = QTextCodec::codecForName(_codec->name());
+        QByteArray gbkarr = gbk->fromUnicode(utf16Text);
+
+        if (_decoder != nullptr) {
+            delete _decoder;
+        }
+        textCodec = QTextCodec::codecForName(_codec->name());
+        _decoder = textCodec->makeDecoder();
+        utf16Text = _decoder->toUnicode(gbkarr);
+    }
+    else {
+        utf16Text = _decoder->toUnicode(text, length);
+    }
+
+    //fix bug 67102 打开超长名称的文件夹，终端界面光标位置不在最后一位
+    //bash 提示符很长的情况下，会有较大概率以五个\b字符结尾，导致光标错位
+    if (utf16Text.startsWith(QStringLiteral("\u001B]0;")) && utf16Text.endsWith(QStringLiteral("\b\b\b\b\b"))) {
+        Session *currSession = SessionManager::instance()->idToSession(_sessionId);
+        if (currSession && (QStringLiteral("bash") == currSession->foregroundProcessName())) {
+            utf16Text.replace(QStringLiteral("\b\b\b\b\b"), QStringLiteral(""));
+        }
+    }
+
     std::wstring unicodeText = utf16Text.toStdWString();
 
     //send characters to terminal emulator
@@ -330,6 +433,11 @@ int Emulation::lineCount() const
 {
     // sum number of lines currently on _screen plus number of lines in history
     return _currentScreen->getLines() + _currentScreen->getHistLines();
+}
+
+int Emulation::columnCount() const
+{
+    return _currentScreen->getColumns();
 }
 
 #define BULK_TIMEOUT1 10
@@ -415,7 +523,8 @@ bool ExtendedCharTable::extendedCharMatch(ushort hash , ushort* unicodePoints , 
     }
     return true;
 }
-ushort ExtendedCharTable::createExtendedChar(ushort* unicodePoints , ushort length)
+
+ushort ExtendedCharTable::createExtendedChar(ushort *unicodePoints, ushort length)
 {
     // look for this sequence of points in the table
     ushort hash = extendedCharHash(unicodePoints,length);

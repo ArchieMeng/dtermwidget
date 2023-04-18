@@ -99,7 +99,7 @@ void KeyboardTranslatorManager::findTranslators()
     _haveLoadedAll = true;
 }
 
-const KeyboardTranslator* KeyboardTranslatorManager::findTranslator(const QString& name)
+KeyboardTranslator* KeyboardTranslatorManager::findTranslator(const QString& name)
 {
     if ( name.isEmpty() )
         return defaultTranslator();
@@ -160,11 +160,11 @@ KeyboardTranslator* KeyboardTranslatorManager::loadTranslator(const QString& nam
     return loadTranslator(&source,name);
 }
 
-const KeyboardTranslator* KeyboardTranslatorManager::defaultTranslator()
+KeyboardTranslator* KeyboardTranslatorManager::defaultTranslator()
 {
     // Try to find the default.keytab file if it exists, otherwise
     // fall back to the hard-coded one
-    const KeyboardTranslator* translator = findTranslator(QLatin1String("default"));
+    KeyboardTranslator* translator = findTranslator(QLatin1String("default"));
     if (!translator)
     {
         QBuffer textBuffer;
@@ -252,6 +252,9 @@ KeyboardTranslatorReader::KeyboardTranslatorReader( QIODevice* source )
         QList<Token> tokens = tokenize( QString::fromUtf8(source->readLine()) );
         if ( !tokens.isEmpty() && tokens.first().type == Token::TitleKeyword )
             _description = tokens[1].text;
+   }
+   if (_description.isEmpty()) {
+       _description = QLatin1String("");
    }
    // read first entry (if any)
    readNext();
@@ -593,6 +596,34 @@ QList<QString> KeyboardTranslatorManager::allTranslators()
     }
 
     return _translators.keys();
+}
+
+KeyboardTranslator *KeyboardTranslatorManager::getTranslator(const QString &name)
+{
+    if ( name.isEmpty() ) {
+        // Try to find the default.keytab file if it exists, otherwise
+        // fall back to the hard-coded one
+        KeyboardTranslator *translator = loadTranslator(QLatin1String("default"));
+        if (!translator) {
+            QBuffer textBuffer;
+            textBuffer.setData(defaultTranslatorText);
+            textBuffer.open(QIODevice::ReadOnly);
+            translator = loadTranslator(&textBuffer, QLatin1String("fallback"));
+        }
+        return translator;
+    }
+
+    if ( _translators.contains(name) && _translators[name] != 0 )
+        return _translators[name];
+
+    KeyboardTranslator *translator = loadTranslator(name);
+
+    if ( translator != 0 )
+        _translators[name] = translator;
+    else if ( !name.isEmpty() )
+        qDebug() << "Unable to load translator" << name;
+
+    return translator;
 }
 
 KeyboardTranslator::Entry::Entry()

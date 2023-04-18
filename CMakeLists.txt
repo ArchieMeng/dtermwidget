@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.1.0 FATAL_ERROR)
 # The cmake_minimum_required(VERSION) command implicitly invokes the cmake_policy(VERSION)
 # command to specify that the current project code is written for the given range of CMake
 # versions.
-project(qtermwidget)
+project(dtermwidget)
 
 include(GNUInstallDirs)
 include(GenerateExportHeader)
@@ -33,7 +33,7 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # Minimum Versions
 set(QT_MINIMUM_VERSION "5.15.0")
-set(LXQTBT_MINIMUM_VERSION "0.12.0")
+set(LXQTBT_MINIMUM_VERSION "0.8.0")
 
 find_package(Qt5Widgets "${QT_MINIMUM_VERSION}" REQUIRED)
 find_package(Qt5LinguistTools "${QT_MINIMUM_VERSION}" REQUIRED)
@@ -55,7 +55,7 @@ if(APPLE)
     endif()
 endif()
 
-set(QTERMWIDGET_LIBRARY_NAME qtermwidget5)
+set(QTERMWIDGET_LIBRARY_NAME dtermwidget5)
 
 
 # main library
@@ -73,17 +73,20 @@ set(SRCS
     lib/kpty.cpp
     lib/kptydevice.cpp
     lib/kptyprocess.cpp
+    lib/ProcessInfo.cpp
     lib/Pty.cpp
     lib/qtermwidget.cpp
     lib/Screen.cpp
     lib/ScreenWindow.cpp
     lib/SearchBar.cpp
     lib/Session.cpp
+    lib/SessionManager.cpp
     lib/ShellCommand.cpp
     lib/TerminalCharacterDecoder.cpp
     lib/TerminalDisplay.cpp
     lib/tools.cpp
     lib/Vt102Emulation.cpp
+    lib/EscapeSequenceUrlExtractor.cpp
 )
 
 # Only the Headers that need to be moc'd go here
@@ -94,13 +97,16 @@ set(HDRS
     lib/kprocess.h
     lib/kptydevice.h
     lib/kptyprocess.h
+    lib/ProcessInfo.h
     lib/Pty.h
     lib/qtermwidget.h
     lib/ScreenWindow.h
     lib/SearchBar.h
     lib/Session.h
+    lib/SessionManager.h
     lib/TerminalDisplay.h
     lib/Vt102Emulation.h
+    lib/EscapeSequenceUrlExtractor.h
 )
 
 set(UI
@@ -114,6 +120,13 @@ set(HDRS_DISTRIB
     lib/KeyboardTranslator.h
     lib/Filter.h
     lib/qtermwidget_interface.h
+    lib/Session.h
+    lib/SessionManager.h
+    lib/BlockArray.h
+    lib/Character.h
+    lib/CharacterColor.h
+    lib/TerminalDisplay.h
+
 )
 
 # dirs
@@ -212,7 +225,7 @@ target_compile_definitions(${QTERMWIDGET_LIBRARY_NAME}
 
 
 generate_export_header(${QTERMWIDGET_LIBRARY_NAME}
-    EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/lib/qtermwidget_export.h"
+    EXPORT_FILE_NAME "${CMAKE_BINARY_DIR}/lib/qtermwidget_export.h"
     BASE_NAME QTERMWIDGET
 )
 
@@ -220,6 +233,8 @@ target_include_directories(${QTERMWIDGET_LIBRARY_NAME}
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib>"
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/lib>"
+        "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/lib>"
+        "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/lib>"
     INTERFACE
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${QTERMWIDGET_LIBRARY_NAME}>"
@@ -244,7 +259,7 @@ install(EXPORT
 )
 
 install(FILES
-    ${HDRS_DISTRIB} "${CMAKE_CURRENT_BINARY_DIR}/lib/qtermwidget_export.h" "${CMAKE_CURRENT_BINARY_DIR}/lib/qtermwidget_version.h"
+    ${HDRS_DISTRIB} "${CMAKE_BINARY_DIR}/lib/qtermwidget_export.h" "${CMAKE_BINARY_DIR}/lib/qtermwidget_version.h"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${QTERMWIDGET_LIBRARY_NAME}"
     COMPONENT Devel
 )
