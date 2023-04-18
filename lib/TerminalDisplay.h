@@ -423,6 +423,9 @@ public:
      */
     bool isBidiEnabled() { return _bidiEnabled; }
 
+    inline bool isUnderlineCursor() const { return _cursorShape == Emulation::KeyboardCursorShape::UnderlineCursor; }
+    inline bool isBoldUnderlineCursor() const { return _cursorShape == Emulation::KeyboardCursorShape::BoldUnderlineCursor; }
+
     /**
      * Sets the terminal screen section which is displayed in this widget.
      * When updateImage() is called, the display fetches the latest character image from the
