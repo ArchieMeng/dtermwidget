@@ -28,11 +28,10 @@
 // Konsole
 #include "Character.h"
 #include "KeyboardTranslator.h"
+#include "Screen.h"
 
 namespace Konsole
 {
-
-class Screen;
 
 /**
  * Provides a window onto a section of a terminal screen.  A terminal widget can then render
@@ -125,6 +124,11 @@ public:
      * the window.
      */
     void setSelectionEnd( int column , int line );
+
+    /******** Modify by n014361 wangpeili 2020-02-13: 新增屏幕全选功能***********×****/
+    void setSelectionAll();
+    /***************** Modify by n014361 End *************************/
+
     /**
      * Retrieves the start of the selection within the window.
      */
@@ -214,7 +218,7 @@ public:
      *
      * @param preserveLineBreaks See Screen::selectedText()
      */
-    QString selectedText( bool preserveLineBreaks ) const;
+    QString selectedText( const Screen::DecodingOptions options ) const;
 
 public slots:
     /**
@@ -243,6 +247,7 @@ signals:
     void selectionChanged();
 
     void scrollToEnd();
+    void selectionCleared();
 
 private:
     int endWindowLine() const;

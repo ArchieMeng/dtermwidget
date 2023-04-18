@@ -1,15 +1,8 @@
-# linux color schema for konsole
+# example scheme for konsole
 
-title Green Tint
+# the title is to appear in the menu.
 
-transparency 0.3 0 150 0
-
-# FIXME
-#
-# The flaw in this schema is that "blick" comes out on the
-# Linux console as intensive background, really.
-# Since this is not used in clients you'll hardly notice
-# it in practice.
+title White on Black
 
 # foreground colors
 
@@ -17,10 +10,10 @@ transparency 0.3 0 150 0
 # to become transparent when an image is present.
 
 #   slot    transparent bold
-#      | red grn blu  | |
+#      |              | |
 #      V V--color--V  V V
 
-color  0 178 178 178  0 0  # regular   foreground color (White)
+color  0 255 255 255  0 0  # regular   foreground color (White)
 color  1   0   0   0  1 0  # regular   background color (Black)
 
 color  2   0   0   0  0 0  # regular   color 0 Black
@@ -36,8 +29,8 @@ color  9 178 178 178  0 0  # regular   color 7 White
 
 # instead of changing the colors, we've flaged the text to become bold
 
-color 10 255 255 255  0 0  # intensive foreground color
-color 11 104 104 104  1 0  # intensive background color
+color 10 255 255 255  0 1  # intensive foreground color
+color 11   0   0   0  1 0  # intensive background color
 
 color 12 104 104 104  0 0  # intensive color 0
 color 13 255  84  84  0 0  # intensive color 1

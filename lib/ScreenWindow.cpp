@@ -116,9 +116,9 @@ QVector<LineProperty> ScreenWindow::getLineProperties()
     return result;
 }
 
-QString ScreenWindow::selectedText( bool preserveLineBreaks ) const
+QString ScreenWindow::selectedText(const Screen::DecodingOptions options) const
 {
-    return _screen->selectedText( preserveLineBreaks );
+    return _screen->selectedText( options );
 }
 
 void ScreenWindow::getSelectionStart( int& column , int& line )
@@ -146,8 +146,21 @@ void ScreenWindow::setSelectionEnd( int column , int line )
     _bufferNeedsUpdate = true;
     emit selectionChanged();
 }
+/********************************************************************
+ 1. @函数:    setSelectionAll
+ 2. @作者:     王培利
+ 3. @日期:     2020-02-13
+ 4. @说明:    屏幕全选功能
+********************************************************************/
+void ScreenWindow::setSelectionAll()
+{
+    _screen->setSelectionAll();
 
-bool ScreenWindow::isSelected( int column , int line )
+    _bufferNeedsUpdate = true;
+    emit selectionChanged();
+}
+
+bool ScreenWindow::isSelected(int column, int line)
 {
     return _screen->isSelected( column , qMin(line + currentLine(),endWindowLine()) );
 }

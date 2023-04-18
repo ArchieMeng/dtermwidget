@@ -150,6 +150,8 @@ Q_OBJECT
      */
     int foregroundProcessGroup() const;
 
+    void setSessionId(int sessionId);
+
   public slots:
 
     /**
@@ -175,7 +177,7 @@ Q_OBJECT
      * @param buffer Pointer to the data to send.
      * @param length Length of @p buffer.
      */
-    void sendData(const char* buffer, int length);
+    void sendData(const char* buffer, int length, const QTextCodec *codec);
 
   signals:
 
@@ -186,7 +188,11 @@ Q_OBJECT
      * @param buffer Pointer to the data received.
      * @param length Length of @p buffer
      */
-    void receivedData(const char* buffer, int length);
+    void receivedData(const char* buffer, int length, bool isCommandExec);
+
+    /******** Modify by nt001000 renfeixiang 2020-05-27:修改 增加参数区别remove和purge卸载命令 Begin***************/
+    bool ptyUninstallTerminal(QString commandname);
+    /******** Modify by nt001000 renfeixiang 2020-05-14:修改 增加参数区别remove和purge卸载命令 End***************/
 
   protected:
       void setupChildProcess() override;
@@ -196,7 +202,12 @@ Q_OBJECT
     void dataReceived();
 
   private:
-      void init();
+    void init();
+    bool isTerminalRemoved();
+    bool bWillRemoveTerminal(QString strCommand);
+    /******** Add by nt001000 renfeixiang 2020-05-14:增加 Purge卸载命令的判断，显示不同的卸载提示框 Begin***************/
+    bool bWillPurgeTerminal(QString strCommand);
+    /******** Add by nt001000 renfeixiang 2020-05-14:增加 Purge卸载命令的判断，显示不同的卸载提示框 End***************/
 
     // takes a list of key=value pairs and adds them
     // to the environment for the process
@@ -207,6 +218,15 @@ Q_OBJECT
     char _eraseChar;
     bool _xonXoff;
     bool _utf8;
+
+    int _sessionId;
+    bool _bUninstall;
+    bool _bNeedBlockCommand = false;//是否为终端内部发送的命令（不是用户手动输入的命令），默认用户手动输入
+    int _receiveDataIndex = -1;
+    const QTextCodec *_textCodec = nullptr;
+    bool _isCommandExec = false;
+
+    QString _program;
 };
 
 }

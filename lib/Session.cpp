@@ -67,22 +67,27 @@ Session::Session(QObject* parent) :
         , _flowControl(true)
         , _fullScripting(false)
         , _sessionId(0)
+    	, _sessionProcessInfo(nullptr)
+    	, _foregroundProcessInfo(nullptr)
 //   , _zmodemBusy(false)
 //   , _zmodemProc(0)
 //   , _zmodemProgress(0)
         , _hasDarkBackground(false)
+        , _isPrimaryScreen(true)
 {
     //prepare DBus communication
 //    new SessionAdaptor(this);
     _sessionId = ++lastSessionId;
-//    QDBusConnection::sessionBus().registerObject(QLatin1String("/Sessions/")+QString::number(_sessionId), this);
+//    QDBusConnection::sessionBus().register    Object(QLatin1String("/Sessions/")+QString::number(_sessionId), this);
 
     //create teletype for I/O with shell process
     _shellProcess = new Pty();
+    _shellProcess->setSessionId(_sessionId);
     ptySlaveFd = _shellProcess->pty()->slaveFd();
 
     //create emulation backend
     _emulation = new Vt102Emulation();
+    _emulation->setSessionId(_sessionId);
 
     connect( _emulation, SIGNAL( titleChanged( int, const QString & ) ),
              this, SLOT( setUserTitle( int, const QString & ) ) );
@@ -94,7 +99,8 @@ Session::Session(QObject* parent) :
              this, SIGNAL( changeTabTextColorRequest( int ) ) );
     connect( _emulation, SIGNAL(profileChangeCommandReceived(const QString &)),
              this, SIGNAL( profileChangeCommandReceived(const QString &)) );
-
+    connect(_emulation, &Konsole::Emulation::primaryScreenInUse,
+            this, &Session::onPrimaryScreenInUse);
     connect(_emulation, SIGNAL(imageResizeRequest(QSize)),
             this, SLOT(onEmulationSizeChange(QSize)));
     connect(_emulation, SIGNAL(imageSizeChanged(int, int)),
@@ -105,15 +111,20 @@ Session::Session(QObject* parent) :
     //connect teletype to emulation backend
     _shellProcess->setUtf8Mode(_emulation->utf8());
 
-    connect( _shellProcess,SIGNAL(receivedData(const char *,int)),this,
-             SLOT(onReceiveBlock(const char *,int)) );
-    connect( _emulation,SIGNAL(sendData(const char *,int)),_shellProcess,
-             SLOT(sendData(const char *,int)) );
+    connect( _shellProcess,SIGNAL(receivedData(const char *,int,bool)),this,
+             SLOT(onReceiveBlock(const char *,int,bool)) );
+    connect( _emulation,SIGNAL(sendData(const char *,int,const QTextCodec *)),_shellProcess,
+             SLOT(sendData(const char *,int,const QTextCodec *)) );
     connect( _emulation,SIGNAL(lockPtyRequest(bool)),_shellProcess,SLOT(lockPty(bool)) );
     connect( _emulation,SIGNAL(useUtf8Request(bool)),_shellProcess,SLOT(setUtf8Mode(bool)) );
 
     connect( _shellProcess,SIGNAL(finished(int,QProcess::ExitStatus)), this, SLOT(done(int)) );
     // not in kprocess anymore connect( _shellProcess,SIGNAL(done(int)), this, SLOT(done(int)) );
+
+    /******** Modify by nt001000 renfeixiang 2020-05-27:修改 增加参数区别remove和purge卸载命令 Begin***************/
+    // 用于卸载终端弹出框提示
+    connect( _shellProcess,SIGNAL(ptyUninstallTerminal(QString)), this, SIGNAL(sessionUninstallTerminal(QString)) );
+    /******** Modify by nt001000 renfeixiang 2020-05-27:修改 增加参数区别remove和purge卸载命令 Begin***************/
 
     //setup timer for monitoring session activity
     _monitorTimer = new QTimer(this);
@@ -185,6 +196,7 @@ void Session::addView(TerminalDisplay * widget)
         // indicates whether or not it is interested in mouse signals
         connect( _emulation , SIGNAL(programUsesMouseChanged(bool)) , widget ,
                  SLOT(setUsesMouse(bool)) );
+        connect( _emulation , &Konsole::Emulation::enableAlternateScrolling, widget, &Konsole::TerminalDisplay::setAlternateScrolling);
 
         widget->setUsesMouse( _emulation->programUsesMouse() );
 
@@ -216,7 +228,58 @@ void Session::viewDestroyed(QObject * view)
     removeView(display);
 }
 
-void Session::removeView(TerminalDisplay * widget)
+/*******************************************************************************
+ 1. @函数:    onUpdateTitleArgs
+ 2. @作者:    ut000610 戴正文
+ 3. @日期:    2020-12-02
+ 4. @说明:    更新标签标题参数
+*******************************************************************************/
+void Session::onUpdateTitleArgs()
+{
+    ProcessInfo *process = getProcessInfo();
+
+    // format tab titles using process info
+    bool ok = false;
+
+    // 用户名 %u
+    QString userName = process->userName();
+    if (_userName != userName) {
+        _userName = userName;
+        emit titleArgsChange(QLatin1String("%u"), _userName);
+    }
+
+    //title.replace(QLatin1String("%h"), Konsole::ProcessInfo::localHost());
+    // 程序名 %n
+    QString programName = process->name(&ok);
+    if (_programName != programName) {
+        _programName = programName;
+        emit titleArgsChange(QLatin1String("%n"), _programName);
+    }
+
+
+    // 获取当前目录 %D
+    QString dir = _reportedWorkingUrl.toLocalFile();
+    ok = true;
+    if (dir.isEmpty()) {
+        // update current directory from process
+        updateWorkingDirectory();
+        // Previous process may have been freed in updateSessionProcessInfo()
+        process = getProcessInfo();
+        dir = process->currentDir(&ok);
+    }
+    if (_currentDir != dir) {
+        _currentDir = dir;
+        emit titleArgsChange(QLatin1String("%D"), _currentDir);
+    }
+}
+
+void Session::onPrimaryScreenInUse(bool use)
+{
+    _isPrimaryScreen = use;
+    emit primaryScreenInUse(use);
+}
+
+void Session::removeView(TerminalDisplay *widget)
 {
     _views.removeAll(widget);
 
@@ -272,6 +335,12 @@ void Session::run()
             qWarning() << "Neither default shell nor $SHELL is set to a correct path. Fallback to" << defaultShell;
             exec = defaultShell;
         }
+
+    }
+
+    if (_program != exec) {
+        // 说明有文件不存在，取最后找到的文件进行替换
+        emit shellWarningMessage(exec, true);
     }
 
     // _arguments sometimes contain ("") so isEmpty()
@@ -296,7 +365,9 @@ void Session::run()
     // tell the terminal exactly which colors are being used, but instead approximates
     // the color scheme as "black on white" or "white on black" depending on whether
     // the background color is deemed dark or not
-    QString backgroundColorHint = _hasDarkBackground ? QLatin1String("COLORFGBG=15;0") : QLatin1String("COLORFGBG=0;15");
+    // fix bug#39147 终端使用vim编辑脚本，命令行终端的主题为跟随系统时无法清楚查看脚本内容
+    // 移除该环境变量，因为终端的主题颜色会实时变化，不能通过设置环境变量的方式
+    //QString backgroundColorHint = _hasDarkBackground ? QLatin1String("COLORFGBG=15;0") : QLatin1String("COLORFGBG=0;15");
 
     /* if we do all the checking if this shell exists then we use it ;)
      * Dont know about the arguments though.. maybe youll need some more checking im not sure
@@ -304,12 +375,26 @@ void Session::run()
      */
     int result = _shellProcess->start(exec,
                                       arguments,
-                                      _environment << backgroundColorHint,
+                                      _environment,// << backgroundColorHint,
                                       windowId(),
                                       _addToUtmp);
 
     if (result < 0) {
-        qDebug() << "CRASHED! result: " << result;
+        //qDebug() << "CRASHED! result: " << result<<arguments;
+        QString processError = _shellProcess->errorString();
+        processError = processError.mid(processError.indexOf(QLatin1String(":")) + 1).trimmed();
+        if(!processError.isEmpty())
+            processError = tr("(%1)").arg(processError);
+
+        QString infoText = QLatin1String("There was an error creating the child process for this terminal. \n"
+                 "Failed to execute child process \"%1\"%2!")
+                .arg(exec)
+                .arg(processError);
+        sendText(infoText);
+        _userTitle = QString::fromLatin1("Session crashed");
+        emit titleChanged();
+        emit shellWarningMessage(exec, false);
+        qWarning() << _shellProcess->errorString();
         return;
     }
 
@@ -400,7 +485,10 @@ void Session::setUserTitle( int what, const QString & caption )
         return;
     }
 
-    if ( modified ) {
+    if (modified) {
+        // 标签标题变化前更新标签标题参数
+        onUpdateTitleArgs();
+        // 标签标题有变化，发送信号通知terminal
         emit titleChanged();
     }
 }
@@ -413,6 +501,8 @@ void Session::setTabTitleFormat(TabTitleContext context , const QString & format
 {
     if ( context == LocalTabTitle ) {
         _localTabTitleFormat = format;
+        ProcessInfo *process = getProcessInfo();
+        process->setUserNameRequired(format.contains(QLatin1String("%u")));
     } else if ( context == RemoteTabTitle ) {
         _remoteTabTitleFormat = format;
     }
@@ -448,6 +538,11 @@ void Session::monitorTimerDone()
     _notifiedActivity=false;
 }
 
+bool Session::isPrimaryScreen()
+{
+    return _isPrimaryScreen;
+}
+
 void Session::activityStateSet(int state)
 {
     if (state==NOTIFYBELL) {
@@ -476,16 +571,16 @@ void Session::activityStateSet(int state)
     emit stateChanged(state);
 }
 
-void Session::onViewSizeChange(int /*height*/, int /*width*/)
+void Session::onViewSizeChange(int height, int width)
 {
-    updateTerminalSize();
+    updateTerminalSize(height, width);
 }
 void Session::onEmulationSizeChange(QSize size)
 {
     setSize(size);
 }
 
-void Session::updateTerminalSize()
+void Session::updateTerminalSize(int height, int width)
 {
     QListIterator<TerminalDisplay *> viewIter(_views);
 
@@ -495,7 +590,8 @@ void Session::updateTerminalSize()
     // minimum number of lines and columns that views require for
     // their size to be taken into consideration ( to avoid problems
     // with new view widgets which haven't yet been set to their correct size )
-    const int VIEW_LINES_THRESHOLD = 2;
+    /***mod by ut001121 zhangmeng 20200615 窗口初始化完成之后修改终端显示内容为最小一行 修复BUG32779, BUG32778***/
+    const int VIEW_LINES_THRESHOLD = (height==1 || width==1) ? 2 : 1;
     const int VIEW_COLUMNS_THRESHOLD = 2;
 
     //select largest number of lines and columns that will fit in all visible views
@@ -562,6 +658,12 @@ void Session::close()
 
 void Session::sendText(const QString & text) const
 {
+    //检测到当前命令是代码中通过sendText发给终端的(而不是用户手动输入的命令)
+    bool isSendByRemoteManage = this->property("isSendByRemoteManage").toBool();
+    if (isSendByRemoteManage) {
+        //将isSendByRemoteManage标记同步给Pty
+        _shellProcess->setProperty("isSendByRemoteManage", QVariant(true));
+    }
     _emulation->sendText(text);
 }
 
@@ -572,8 +674,19 @@ void Session::sendKeyEvent(QKeyEvent* e) const
 
 Session::~Session()
 {
-    delete _emulation;
-    delete _shellProcess;
+    _wantedClose = true;
+    if(nullptr != _foregroundProcessInfo){
+        delete _foregroundProcessInfo;
+    }
+    if(nullptr != _sessionProcessInfo){
+        delete _sessionProcessInfo;
+    }
+    if(nullptr != _emulation){
+        delete _emulation;
+    }
+    if(nullptr != _shellProcess){
+        delete _shellProcess;
+    }
 //  delete _zmodemProc;
 }
 
@@ -589,31 +702,44 @@ QString Session::profileKey() const
 
 void Session::done(int exitStatus)
 {
-    if (!_autoClose) {
-        _userTitle = QString::fromLatin1("This session is done. Finished");
-        emit titleChanged();
+    /**
+    相关说明如下：
+    1._wantedClose ：session是否正常结束，当session.close 或 session.析构时 为true，默认false
+    2._autoClose   ：是否自动关闭 由传参控制，当传参含--keep-open 或 含-e 时 为false，默认true
+    3.当【运行脚本命令-C】且【_autoClose=false】时，命令最后会补上exit，命令结束会触发process.finished-》session.done
+    */
+    qDebug()<<"done exitStatus:"<<exitStatus<< _shellProcess->exitStatus();
+    if (_autoClose || _wantedClose) {
+        emit finished();
         return;
     }
 
-    // message is not being used. But in the original kpty.cpp file
-    // (https://cgit.kde.org/kpty.git/) it's part of a notification.
-    // So, we make it translatable, hoping that in the future it will
-    // be used in some kind of notification.
-    QString message;
-    if (!_wantedClose || exitStatus != 0) {
-
-        if (_shellProcess->exitStatus() == QProcess::NormalExit) {
-            message = tr("Session '%1' exited with status %2.").arg(_nameTitle).arg(exitStatus);
-        } else {
-            message = tr("Session '%1' crashed.").arg(_nameTitle);
-        }
-    }
-
-    if ( !_wantedClose && _shellProcess->exitStatus() != QProcess::NormalExit )
-        message = tr("Session '%1' exited unexpectedly.").arg(_nameTitle);
-    else
+    /************************ Add by sunchengxi 2020-09-15:Bug#42864 无法同时打开多个终端 Begin************************/
+    if (false == _autoClose && false == _wantedClose && _shellProcess->exitStatus() == QProcess::NormalExit) {
+        qDebug() << "autoClose is false.";
+        emit titleChanged();
         emit finished();
-
+        return;
+    }
+    /************************ Add by sunchengxi 2020-09-15:Bug#42864 无法同时打开多个终端 End ************************/
+    if(exitStatus != 0)
+    {
+        QString message;
+        QString infoText;
+        if (exitStatus == -1){
+            infoText.sprintf("There was an error creating the child process for this terminal. \n"
+                     "Failed to execute child process \"%s\"(No such file or directory)!", _program.toUtf8().data());
+            message = QLatin1String("Session crashed.");
+        }
+        else {
+            infoText.sprintf("The child process exited normally with status %d.", exitStatus);
+            message.sprintf("Session '%s' exited with status %d.",
+                      _nameTitle.toUtf8().data(), exitStatus);
+        }
+        _userTitle = message;
+        //sendText(infoText);
+        emit titleChanged();
+    }
 }
 
 Emulation * Session::emulation() const
@@ -624,6 +750,16 @@ Emulation * Session::emulation() const
 QString Session::keyBindings() const
 {
     return _emulation->keyBindings();
+}
+
+void Session::setBackspaceMode(char *key, int length)
+{
+    _emulation->setBackspaceMode(key, length);
+}
+
+void Session::setDeleteMode(char *key, int length)
+{
+    _emulation->setDeleteMode(key, length);
 }
 
 QStringList Session::environment() const
@@ -653,6 +789,12 @@ void Session::setTitle(TitleRole role , const QString & newTitle)
             _nameTitle = newTitle;
         } else if ( role == DisplayedTitleRole ) {
             _displayTitle = newTitle;
+            // without these, that title will be overridden by the expansion of
+            // title format shortly after, which will confuses users.
+            _localTabTitleFormat = newTitle;
+            _remoteTabTitleFormat = newTitle;
+
+//            qDebug() << "curr running process:" << newTitle << endl;
         }
 
         emit titleChanged();
@@ -903,9 +1045,9 @@ void Session::zmodemFinished()
   }
 }
 */
-void Session::onReceiveBlock( const char * buf, int len )
+void Session::onReceiveBlock(const char * buf, int len, bool isCommandExec)
 {
-    _emulation->receiveData( buf, len );
+    _emulation->receiveData(buf, len, isCommandExec);
     emit receivedData( QString::fromLatin1( buf, len ) );
 }
 
@@ -922,17 +1064,150 @@ void Session::setSize(const QSize & size)
 
     emit resizeRequest(size);
 }
-int Session::foregroundProcessId() const
+
+QString Session::getDynamicProcessName()
 {
-    return _shellProcess->foregroundProcessGroup();
+    bool ok = false;
+    QString processName = getProcessInfo()->name(&ok);
+    if (ok) {
+        return processName;
+    }
+
+    return QString::fromLocal8Bit(qgetenv("SHELL"));
 }
+
+int Session::getDynamicProcessId()
+{
+    bool ok = false;
+    int pid = getProcessInfo()->pid(&ok);
+    if (ok) {
+        if (this->isForegroundProcessActive()) {
+            return pid;
+        }
+    }
+
+    return 0;
+}
+
+void Session::updateWorkingDirectory()
+{
+    updateSessionProcessInfo();
+
+    const QString currentDir = _sessionProcessInfo->validCurrentDir();
+    if (currentDir != _currentWorkingDir) {
+        _currentWorkingDir = currentDir;
+        emit currentDirectoryChanged(_currentWorkingDir);
+    }
+}
+
+int Session::foregroundProcessId()
+{
+    int pid;
+
+    bool ok = false;
+    pid = getProcessInfo()->pid(&ok);
+    if (!ok) {
+        pid = -1;
+    }
+
+    return pid;
+}
+
+bool Session::isForegroundProcessActive()
+{
+    // foreground process info is always updated after this
+    return (_shellProcess->processId() != _shellProcess->foregroundProcessGroup());
+}
+
+QString Session::foregroundProcessName()
+{
+    QString name;
+
+    if (updateForegroundProcessInfo()) {
+        bool ok = false;
+        name = _foregroundProcessInfo->name(&ok);
+        if (!ok) {
+            name.clear();
+        }
+    }
+
+    return name;
+}
+
 int Session::processId() const
 {
     return static_cast<int>(_shellProcess->processId());
 }
+
+ProcessInfo *Session::getProcessInfo()
+{
+    ProcessInfo *process = nullptr;
+
+    if (isForegroundProcessActive() && updateForegroundProcessInfo()) {
+        process = _foregroundProcessInfo;
+    } else {
+        updateSessionProcessInfo();
+        process = _sessionProcessInfo;
+    }
+
+    return process;
+}
+
+void Session::updateSessionProcessInfo()
+{
+    Q_ASSERT(_shellProcess);
+
+    bool ok;
+    // The checking for pid changing looks stupid, but it is needed
+    // at the moment to workaround the problem that processId() might
+    // return 0
+    if ((_sessionProcessInfo == nullptr) ||
+            (processId() != 0 && processId() != _sessionProcessInfo->pid(&ok))) {
+        delete _sessionProcessInfo;
+        _sessionProcessInfo = ProcessInfo::newInstance(processId(),
+                                                       tabTitleFormat(Session::LocalTabTitle));
+        _sessionProcessInfo->setUserHomeDir();
+    }
+    _sessionProcessInfo->update();
+}
+
+bool Session::updateForegroundProcessInfo()
+{
+    Q_ASSERT(_shellProcess);
+
+    const int foregroundPid = _shellProcess->foregroundProcessGroup();
+    if (foregroundPid != _foregroundPid) {
+        if(nullptr != _foregroundProcessInfo){
+            delete _foregroundProcessInfo;
+        }
+
+        _foregroundProcessInfo = ProcessInfo::newInstance(foregroundPid,
+                                                          tabTitleFormat(Session::LocalTabTitle));
+        _foregroundPid = foregroundPid;
+    }
+
+    if (_foregroundProcessInfo != nullptr) {
+        _foregroundProcessInfo->update();
+        return _foregroundProcessInfo->isValid();
+    } else {
+        return false;
+    }
+}
+
 int Session::getPtySlaveFd() const
 {
     return ptySlaveFd;
+}
+
+/*******************************************************************************
+ 1. @函数:    getEraseChar
+ 2. @作者:    ut000610 戴正文
+ 3. @日期:    2020-06-02
+ 4. @说明:    获取tty的erase的字符
+*******************************************************************************/
+char Session::getEraseChar()
+{
+    return _shellProcess->erase();
 }
 
 SessionGroup::SessionGroup()
