@@ -213,6 +213,7 @@ public:
 
     void setLineSpacing(uint);
     void setMargin(int);
+    void setHorizontalMargin(int);
 
     int margin() const;
     uint lineSpacing() const;

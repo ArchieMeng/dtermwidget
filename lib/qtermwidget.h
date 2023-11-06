@@ -277,6 +277,8 @@ public:
     /** Set the empty space outside the terminal */
     void setMargin(int) override;
 
+    void setHorizontalMargin(int);
+
     /** Get the empty space outside the terminal */
     int getMargin() const override;
 

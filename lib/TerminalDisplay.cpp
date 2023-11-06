@@ -24,6 +24,7 @@
 #include "TerminalDisplay.h"
 
 // Qt
+#include <QtGlobal>
 #include <QAbstractButton>
 #include <QApplication>
 #include <QBoxLayout>
@@ -3681,12 +3682,17 @@ void TerminalDisplay::setLineSpacing(uint i)
 
 int TerminalDisplay::margin() const
 {
-    return _topBaseMargin;
+    return qMax(_topBaseMargin, _leftBaseMargin);
 }
 
 void TerminalDisplay::setMargin(int i)
 {
     _topBaseMargin = i;
+    _leftBaseMargin = i;
+}
+
+void TerminalDisplay::setHorizontalMargin(int i)
+{
     _leftBaseMargin = i;
 }
 

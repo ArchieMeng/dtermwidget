@@ -1033,6 +1033,11 @@ void QTermWidget::setMargin(int margin)
     m_impl->m_terminalDisplay->setMargin(margin);
 }
 
+void QTermWidget::setHorizontalMargin(int margin)
+{
+    m_impl->m_terminalDisplay->setHorizontalMargin(margin);
+}
+
 int QTermWidget::getMargin() const
 {
     return m_impl->m_terminalDisplay->margin();
