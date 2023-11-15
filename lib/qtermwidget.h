@@ -52,6 +52,7 @@ public:
     //Creation of widget
     QTermWidget(int startnow, // 1 = start shell program immediately
                 QWidget * parent = nullptr);
+
     // A dummy constructor for Qt Designer. startnow is 1 by default
     QTermWidget(QWidget *parent = nullptr);
 
@@ -380,6 +381,8 @@ public slots:
     void zoomIn();
     void zoomOut();
 
+    void search(QString text, bool forwards, bool next);
+
     // Set size
     void setSize(const QSize &);
 
@@ -405,11 +408,11 @@ protected:
 protected slots:
     void sessionFinished();
     void selectionChanged(bool textSelected);
+    void find(QString text);
+    void findNext(QString text);
+    void findPrevious(QString text);
 
 private slots:
-    void find();
-    void findNext();
-    void findPrevious();
     void matchFound(int startColumn, int startLine, int endColumn, int endLine);
     /**
      * Emulation::cursorChanged() signal propagates to here and QTermWidget
@@ -419,13 +422,13 @@ private slots:
     void snapshot();
 
 private:
-    void search(bool forwards, bool next);
     void setZoom(int step);
     void init(int startnow);
     void addSnapShotTimer();
     void interactionHandler();
 
     TermWidgetImpl *m_impl;
+    bool       m_hideSearchBar;
     SearchBar *m_searchBar;
     QVBoxLayout *m_layout;
     static QTranslator *m_translator;

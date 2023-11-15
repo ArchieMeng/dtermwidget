@@ -50,7 +50,7 @@ QTranslator *QTermWidget::m_translator = nullptr;
 
 QTermWidgetInterface* QTermWidget::createWidget(int startnow) const
 {
-   return new QTermWidget(startnow);
+    return new QTermWidget(startnow);
 }
 
 void *createTermWidget(int startnow, void *parent)
@@ -127,15 +127,16 @@ TerminalDisplay *TermWidgetImpl::createTerminalDisplay(Session *session, QWidget
     return display;
 }
 
-
 QTermWidget::QTermWidget(int startnow, QWidget *parent)
-    : QWidget(parent)
+    : QWidget(parent),
+      m_hideSearchBar(true)
 {
     init(startnow);
 }
 
 QTermWidget::QTermWidget(QWidget *parent)
-    : QWidget(parent)
+    : QWidget(parent),
+      m_hideSearchBar(true)
 {
     init(1);
 }
@@ -145,22 +146,22 @@ void QTermWidget::selectionChanged(bool textSelected)
     emit copyAvailable(textSelected);
 }
 
-void QTermWidget::find()
+void QTermWidget::find(QString text)
 {
-    search(true, false);
+    search(text, true, false);
 }
 
-void QTermWidget::findNext()
+void QTermWidget::findNext(QString text)
 {
-    search(true, true);
+    search(text, true, true);
 }
 
-void QTermWidget::findPrevious()
+void QTermWidget::findPrevious(QString text)
 {
-    search(false, false);
+    search(text, false, false);
 }
 
-void QTermWidget::search(bool forwards, bool next)
+void QTermWidget::search(QString text, bool forwards, bool next)
 {
     int startColumn, startLine;
 
@@ -175,7 +176,7 @@ void QTermWidget::search(bool forwards, bool next)
     //qDebug() << "current selection starts at: " << startColumn << startLine;
     //qDebug() << "current cursor position: " << m_impl->m_terminalDisplay->screenWindow()->cursorPosition();
 
-    QRegExp regExp(m_searchBar->searchText());
+    QRegExp regExp(text);
     regExp.setPatternSyntax(m_searchBar->useRegularExpression() ? QRegExp::RegExp : QRegExp::FixedString);
     regExp.setCaseSensitivity(m_searchBar->matchCase() ? Qt::CaseSensitive : Qt::CaseInsensitive);
 
@@ -436,6 +437,7 @@ void QTermWidget::init(int startnow)
     m_impl->m_terminalDisplay->filterChain()->addFilter(urlFilter);
     m_impl->m_terminalDisplay->filterChain()->setSessionId(m_impl->m_session->sessionId());
 
+    // Todo: Add option to disable this search bar
     m_searchBar = new SearchBar(this);
     m_searchBar->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Maximum);
     connect(m_searchBar, SIGNAL(searchCriteriaChanged()), this, SLOT(find()));
@@ -837,7 +839,7 @@ QString QTermWidget::keyBindings()
 
 void QTermWidget::toggleShowSearchBar()
 {
-    m_searchBar->isHidden() ? m_searchBar->show() : m_searchBar->hide();
+    if (!m_hideSearchBar) m_searchBar->isHidden() ? m_searchBar->show() : m_searchBar->hide();
 }
 
 bool QTermWidget::flowControlEnabled(void)
